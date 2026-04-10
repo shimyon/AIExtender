@@ -10,7 +10,7 @@ app.use(express.json());
 const supportedProviders = ["ollama", "openai", "gemini", "claude"];
 
 function validateBody(body) {
-  const { provider, model, prompt } = body || {};
+  const { provider, model, prompt, ollamaBaseUrl } = body || {};
 
   if (!provider || !model || !prompt) {
     return "provider, model, and prompt are required";
@@ -20,12 +20,39 @@ function validateBody(body) {
     return `Unsupported provider. Use one of: ${supportedProviders.join(", ")}`;
   }
 
+  if (provider === "ollama") {
+    if (typeof ollamaBaseUrl !== "string" || ollamaBaseUrl.trim() === "") {
+      return "ollamaBaseUrl is required for provider ollama";
+    }
+    return validateOllamaBaseUrl(ollamaBaseUrl.trim());
+  }
+
   return null;
 }
 
-async function callOllama(model, prompt) {
-  const baseUrl = process.env.OLLAMA_BASE_URL || "http://44.196.193.97:11434";
-  const url = `${baseUrl}/api/generate`;
+function validateOllamaBaseUrl(urlString) {
+  try {
+    const u = new URL(String(urlString).trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return "ollamaBaseUrl must use http or https";
+    }
+    return null;
+  } catch {
+    return "ollamaBaseUrl must be a valid URL (e.g. https://ollama.example.com:11434)";
+  }
+}
+
+function buildOllamaGenerateUrl(baseInput) {
+  const trimmed = String(baseInput).trim().replace(/\/+$/, "");
+  if (/\/api\/generate$/i.test(trimmed)) {
+    return trimmed;
+  }
+  return `${trimmed}/api/generate`;
+}
+
+async function callOllama(model, prompt, ollamaBaseUrl) {
+  const base = String(ollamaBaseUrl).trim();
+  const url = buildOllamaGenerateUrl(base);
   const response = await axios.post(url, {
     model,
     prompt,
@@ -108,10 +135,16 @@ async function callClaude(model, prompt, apiKey) {
   );
 }
 
-async function getProviderResponse(provider, model, prompt, apiKey) {
+async function getProviderResponse(
+  provider,
+  model,
+  prompt,
+  apiKey,
+  ollamaBaseUrl
+) {
   switch (provider) {
     case "ollama":
-      return callOllama(model, prompt);
+      return callOllama(model, prompt, ollamaBaseUrl);
     case "openai":
       return callOpenAI(model, prompt, apiKey);
     case "gemini":
@@ -129,10 +162,16 @@ app.post("/api/generate", async (req, res) => {
     return res.status(400).json({ error });
   }
 
-  const { provider, model, prompt, apiKey } = req.body;
+  const { provider, model, prompt, apiKey, ollamaBaseUrl } = req.body;
 
   try {
-    const text = await getProviderResponse(provider, model, prompt, apiKey);
+    const text = await getProviderResponse(
+      provider,
+      model,
+      prompt,
+      apiKey,
+      ollamaBaseUrl
+    );
     return res.json({
       provider,
       model,
