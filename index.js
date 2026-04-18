@@ -59,7 +59,12 @@ async function callOllama(model, prompt, ollamaBaseUrl) {
     stream: false,
   });
 
-  return response.data?.response || "";
+  return {
+    response: response.data?.response || "",
+    inputToken: response.data?.prompt_eval_count || 0,
+    outputToken: response.data?.eval_count || 0,
+    totalToken: (response.data?.eval_count + response.data?.prompt_eval_count) || 0
+  };
 }
 
 async function callOpenAI(model, prompt, apiKey) {
@@ -81,8 +86,11 @@ async function callOpenAI(model, prompt, apiKey) {
       },
     }
   );
-
-  return response.data?.choices?.[0]?.message?.content || "";
+  return { response: response.data?.choices?.[0]?.message?.content || "",
+    inputToken: response.data?.usage?.prompt_tokens || 0,
+    outputToken: response.data?.usage?.completion_tokens || 0,
+    totalToken: response.data?.usage?.total_tokens || 0
+   };
 }
 
 async function callGemini(model, prompt, apiKey) {
@@ -97,11 +105,12 @@ async function callGemini(model, prompt, apiKey) {
     contents: [{ parts: [{ text: prompt }] }],
   });
 
-  return (
-    response.data?.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text)
-      .filter(Boolean)
-      .join("\n") || ""
+  return ({
+    response: response.data?.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join("\n") || "",
+    inputToken: response.data?.usageMetadata?.promptTokenCount || 0,
+    outputToken: (response.data?.usageMetadata?.candidatesTokenCount + response.data?.usageMetadata?.thoughtsTokenCount) || 0,
+    totalToken: response.data?.usageMetadata?.totalTokenCount || 0
+  }
   );
 }
 
@@ -127,11 +136,12 @@ async function callClaude(model, prompt, apiKey) {
     }
   );
 
-  return (
-    response.data?.content
-      ?.map((part) => part.text)
-      .filter(Boolean)
-      .join("\n") || ""
+  return ({
+    response: response.data?.content?.map((part) => part.text).filter(Boolean).join("\n") || "",
+    inputToken: response.data?.usage?.input_tokens || 0,
+    outputToken: response.data?.usage?.output_tokens || 0,
+    totalToken: (response.data?.usage?.input_tokens + response.data?.usage?.output_tokens) || 0
+  }
   );
 }
 
