@@ -5,7 +5,14 @@ const axios = require("axios");
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({
+  limit: '150mb'
+}));
+
+app.use(express.urlencoded({
+  extended: true,
+  limit: '150mb'
+}));
 
 const supportedProviders = ["ollama", "openai", "gemini", "claude"];
 
@@ -57,6 +64,9 @@ async function callOllama(model, prompt, ollamaBaseUrl) {
     model,
     prompt,
     stream: false,
+  }, {
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
   });
 
   return {
@@ -80,17 +90,20 @@ async function callOpenAI(model, prompt, apiKey) {
       messages: [{ role: "user", content: prompt }],
     },
     {
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
       headers: {
         Authorization: `Bearer ${resolvedApiKey}`,
         "Content-Type": "application/json",
       },
-    }
+    },
   );
-  return { response: response.data?.choices?.[0]?.message?.content || "",
+  return {
+    response: response.data?.choices?.[0]?.message?.content || "",
     inputToken: response.data?.usage?.prompt_tokens || 0,
     outputToken: response.data?.usage?.completion_tokens || 0,
     totalToken: response.data?.usage?.total_tokens || 0
-   };
+  };
 }
 
 async function callGemini(model, prompt, apiKey) {
@@ -103,6 +116,9 @@ async function callGemini(model, prompt, apiKey) {
 
   const response = await axios.post(url, {
     contents: [{ parts: [{ text: prompt }] }],
+  }, {
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
   });
 
   return ({
@@ -124,16 +140,17 @@ async function callClaude(model, prompt, apiKey) {
     "https://api.anthropic.com/v1/messages",
     {
       model,
-      max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
     },
     {
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
       headers: {
         "x-api-key": resolvedApiKey,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-    }
+    },
   );
 
   return ({
