@@ -131,7 +131,8 @@ async function callOpenRouter(model, prompt, apiKey) {
     response: response.data?.choices?.[0]?.message?.content || "",
     inputToken: response.data?.usage?.prompt_tokens || 0,
     outputToken: response.data?.usage?.completion_tokens || 0,
-    totalToken: response.data?.usage?.total_tokens || 0
+    totalToken: response.data?.usage?.total_tokens || 0,
+    cost_details: response.data?.usage?.cost_details || {}
   };
 }
 
