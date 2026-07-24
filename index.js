@@ -136,6 +136,34 @@ async function callOpenRouter(model, prompt, apiKey) {
   };
 }
 
+async function callMistral(model, prompt, apiKey) {
+  const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error("Missing Mistral API Key");
+  }
+
+  const response = await axios.post(
+    "https://api.mistral.ai/v1/chat/completions",
+    {
+      model,
+      messages: [{ role: "user", content: prompt }],
+    },
+    {
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      headers: {
+        Authorization: `Bearer ${resolvedApiKey}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+  return {
+    response: response.data?.choices?.[0]?.message?.content || "",
+    inputToken: response.data?.usage?.prompt_tokens || 0,
+    outputToken: response.data?.usage?.completion_tokens || 0,
+    totalToken: response.data?.usage?.total_tokens || 0,
+  };
+}
 
 async function callGemini(model, prompt, apiKey) {
   const resolvedApiKey = apiKey || process.env.GEMINI_API_KEY;
@@ -211,6 +239,9 @@ async function getProviderResponse(
       return callClaude(model, prompt, apiKey);
     case "openrouter":
       return callOpenRouter(model, prompt, apiKey);
+    case "mistral":
+      return callMistral(model, prompt, apiKey);
+
     default:
       throw new Error("Unsupported provider");
   }
