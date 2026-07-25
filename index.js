@@ -14,7 +14,7 @@ app.use(express.urlencoded({
   limit: '150mb'
 }));
 
-const supportedProviders = ["ollama", "openai", "gemini", "claude", "openrouter"];
+const supportedProviders = ["ollama", "openai", "gemini", "claude", "openrouter","mistral"];
 
 function validateBody(body) {
   const { provider, model, prompt, ollamaBaseUrl } = body || {};
@@ -137,7 +137,7 @@ async function callOpenRouter(model, prompt, apiKey) {
 }
 
 async function callMistral(model, prompt, apiKey) {
-  const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
+  const resolvedApiKey = apiKey || process.env.MISTRAL_API_KEY;
   if (!resolvedApiKey) {
     throw new Error("Missing Mistral API Key");
   }
