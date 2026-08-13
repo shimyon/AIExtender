@@ -57,12 +57,19 @@ function hasNonEmptyString(value) {
   return typeof value === "string" && value.trim() !== "";
 }
 
-function validateBedrockAuth(body) {
-  const { region, apiKey, accessKeyId, secretAccessKey } = body || {};
-
-  if (!hasNonEmptyString(region)) {
-    return "region is required for provider bedrock";
+function resolveBedrockRegion(body) {
+  if (hasNonEmptyString(body?.region)) {
+    return body.region.trim();
   }
+  const fromEnv = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+  if (hasNonEmptyString(fromEnv)) {
+    return fromEnv.trim();
+  }
+  return "us-east-1";
+}
+
+function validateBedrockAuth(body) {
+  const { apiKey, accessKeyId, secretAccessKey } = body || {};
 
   const hasApiKey = hasNonEmptyString(apiKey);
   const hasIam =
@@ -180,12 +187,6 @@ async function callMistral(model, prompt, apiKey) {
     throw new Error("Missing Mistral API Key");
   }
 
-
-    const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
-    if (!resolvedApiKey) {
-      throw new Error("Missing Mistral API Key");
-    }
-
     const response = await axios.post(
       "https://api.mistral.ai/v1/chat/completions",
       {
@@ -208,10 +209,6 @@ async function callMistral(model, prompt, apiKey) {
       outputToken: response.data?.usage?.completion_tokens || 0,
       totalToken: response.data?.usage?.total_tokens || 0,
     };
-  }
-  catch (ex) {
-    console.log("Mistral Error : ", ex)
-  }
 }
 
 async function callGemini(model, prompt, apiKey) {
@@ -420,9 +417,7 @@ app.post("/api/generate", async (req, res) => {
     prompt,
     apiKey,
     ollamaBaseUrl,
-    region,
     accessKeyId,
-    secretAccessKey,
     sessionToken,
     maxTokens,
   } = req.body;
@@ -435,9 +430,9 @@ app.post("/api/generate", async (req, res) => {
       apiKey,
       ollamaBaseUrl,
       {
-        region,
+        region: resolveBedrockRegion(req.body),
         accessKeyId,
-        secretAccessKey,
+        secretAccessKey:apiKey,
         sessionToken,
         maxTokens,
       }
