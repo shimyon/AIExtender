@@ -175,8 +175,10 @@ async function callOpenRouter(model, prompt, apiKey) {
 }
 
 async function callMistral(model, prompt, apiKey) {
-  console.log("Mistral apiKey", apiKey)
-  try {
+  const resolvedApiKey = apiKey || process.env.MISTRAL_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error("Missing Mistral API Key");
+  }
 
 
     const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
