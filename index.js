@@ -1,6 +1,10 @@
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
+const {
+  BedrockRuntimeClient,
+  ConverseCommand,
+} = require("@aws-sdk/client-bedrock-runtime");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,7 +18,15 @@ app.use(express.urlencoded({
   limit: '150mb'
 }));
 
-const supportedProviders = ["ollama", "openai", "gemini", "claude", "openrouter"];
+const supportedProviders = [
+  "ollama",
+  "openai",
+  "gemini",
+  "claude",
+  "openrouter",
+  "mistral",
+  "Bedrock",
+];
 
 function validateBody(body) {
   const { provider, model, prompt, ollamaBaseUrl } = body || {};
@@ -32,6 +44,32 @@ function validateBody(body) {
       return "ollamaBaseUrl is required for provider ollama";
     }
     return validateOllamaBaseUrl(ollamaBaseUrl.trim());
+  }
+
+  if (provider === "Bedrock") {
+    return validateBedrockAuth(body);
+  }
+
+  return null;
+}
+
+function hasNonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function validateBedrockAuth(body) {
+  const { region, apiKey, accessKeyId, secretAccessKey } = body || {};
+
+  if (!hasNonEmptyString(region)) {
+    return "region is required for provider bedrock";
+  }
+
+  const hasApiKey = hasNonEmptyString(apiKey);
+  const hasIam =
+    hasNonEmptyString(accessKeyId) && hasNonEmptyString(secretAccessKey);
+
+  if (!hasApiKey && !hasIam) {
+    return "bedrock requires apiKey or accessKeyId and secretAccessKey";
   }
 
   return null;
@@ -137,32 +175,41 @@ async function callOpenRouter(model, prompt, apiKey) {
 }
 
 async function callMistral(model, prompt, apiKey) {
-  const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
-  if (!resolvedApiKey) {
-    throw new Error("Missing Mistral API Key");
-  }
+  console.log("Mistral apiKey", apiKey)
+  try {
 
-  const response = await axios.post(
-    "https://api.mistral.ai/v1/chat/completions",
-    {
-      model,
-      messages: [{ role: "user", content: prompt }],
-    },
-    {
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      headers: {
-        Authorization: `Bearer ${resolvedApiKey}`,
-        "Content-Type": "application/json",
+
+    const resolvedApiKey = apiKey || process.env.OPENROUTER_API_KEY;
+    if (!resolvedApiKey) {
+      throw new Error("Missing Mistral API Key");
+    }
+
+    const response = await axios.post(
+      "https://api.mistral.ai/v1/chat/completions",
+      {
+        model,
+        messages: [{ role: "user", content: prompt }],
       },
-    },
-  );
-  return {
-    response: response.data?.choices?.[0]?.message?.content || "",
-    inputToken: response.data?.usage?.prompt_tokens || 0,
-    outputToken: response.data?.usage?.completion_tokens || 0,
-    totalToken: response.data?.usage?.total_tokens || 0,
-  };
+      {
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        headers: {
+          Authorization: `Bearer ${resolvedApiKey}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    console.log("Mistral Response", response)
+    return {
+      response: response.data?.choices?.[0]?.message?.content || "",
+      inputToken: response.data?.usage?.prompt_tokens || 0,
+      outputToken: response.data?.usage?.completion_tokens || 0,
+      totalToken: response.data?.usage?.total_tokens || 0,
+    };
+  }
+  catch (ex) {
+    console.log("Mistral Error : ", ex)
+  }
 }
 
 async function callGemini(model, prompt, apiKey) {
@@ -221,12 +268,122 @@ async function callClaude(model, prompt, apiKey) {
   );
 }
 
+function extractBedrockText(content) {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => part?.text)
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildBedrockConversePayload(prompt, maxTokens) {
+  const payload = {
+    messages: [
+      {
+        role: "user",
+        content: [{ text: prompt }],
+      },
+    ],
+  };
+  if (maxTokens != null && Number.isFinite(Number(maxTokens))) {
+    payload.inferenceConfig = { maxTokens: Number(maxTokens) };
+  }
+  return payload;
+}
+
+async function callBedrockWithIam(model, prompt, auth) {
+  const client = new BedrockRuntimeClient({
+    region: auth.region,
+    credentials: {
+      accessKeyId: auth.accessKeyId,
+      secretAccessKey: auth.secretAccessKey,
+      ...(hasNonEmptyString(auth.sessionToken)
+        ? { sessionToken: auth.sessionToken.trim() }
+        : {}),
+    },
+  });
+
+  const response = await client.send(
+    new ConverseCommand({
+      modelId: model,
+      ...buildBedrockConversePayload(prompt, auth.maxTokens),
+    })
+  );
+
+  return {
+    response: extractBedrockText(response.output?.message?.content),
+    inputToken: response.usage?.inputTokens || 0,
+    outputToken: response.usage?.outputTokens || 0,
+    totalToken: response.usage?.totalTokens || 0,
+  };
+}
+
+async function callBedrockWithApiKey(model, prompt, auth) {
+  const url = `https://bedrock-runtime.${encodeURIComponent(
+    auth.region
+  )}.amazonaws.com/model/${encodeURIComponent(model)}/converse`;
+
+  const response = await axios.post(
+    url,
+    buildBedrockConversePayload(prompt, auth.maxTokens),
+    {
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      headers: {
+        Authorization: `Bearer ${auth.apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    }
+  );
+
+  const data = response.data || {};
+  return {
+    response: extractBedrockText(data.output?.message?.content),
+    inputToken: data.usage?.inputTokens || 0,
+    outputToken: data.usage?.outputTokens || 0,
+    totalToken: data.usage?.totalTokens || 0,
+  };
+}
+
+async function callBedrock(model, prompt, auth) {
+  const region = String(auth.region).trim();
+  const apiKey = hasNonEmptyString(auth.apiKey) ? auth.apiKey.trim() : "";
+  const accessKeyId = hasNonEmptyString(auth.accessKeyId)
+    ? auth.accessKeyId.trim()
+    : "";
+  const secretAccessKey = hasNonEmptyString(auth.secretAccessKey)
+    ? auth.secretAccessKey.trim()
+    : "";
+  const sessionToken = hasNonEmptyString(auth.sessionToken)
+    ? auth.sessionToken.trim()
+    : "";
+
+  const resolved = {
+    region,
+    apiKey,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    maxTokens: auth.maxTokens,
+  };
+
+  if (accessKeyId && secretAccessKey) {
+    return callBedrockWithIam(model, prompt, resolved);
+  }
+
+  return callBedrockWithApiKey(model, prompt, resolved);
+}
+
 async function getProviderResponse(
   provider,
   model,
   prompt,
   apiKey,
-  ollamaBaseUrl
+  ollamaBaseUrl,
+  extras = {}
 ) {
   switch (provider) {
     case "ollama":
@@ -241,6 +398,8 @@ async function getProviderResponse(
       return callOpenRouter(model, prompt, apiKey);
     case "mistral":
       return callMistral(model, prompt, apiKey);
+    case "Bedrock":
+      return callBedrock(model, prompt, { apiKey, ...extras });
 
     default:
       throw new Error("Unsupported provider");
@@ -253,7 +412,18 @@ app.post("/api/generate", async (req, res) => {
     return res.status(400).json({ error });
   }
 
-  const { provider, model, prompt, apiKey, ollamaBaseUrl } = req.body;
+  const {
+    provider,
+    model,
+    prompt,
+    apiKey,
+    ollamaBaseUrl,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    maxTokens,
+  } = req.body;
 
   try {
     const text = await getProviderResponse(
@@ -261,7 +431,14 @@ app.post("/api/generate", async (req, res) => {
       model,
       prompt,
       apiKey,
-      ollamaBaseUrl
+      ollamaBaseUrl,
+      {
+        region,
+        accessKeyId,
+        secretAccessKey,
+        sessionToken,
+        maxTokens,
+      }
     );
     return res.json({
       provider,
